@@ -1,3 +1,5 @@
+#define _GNU_SOURCE
+#include <sched.h>
 #include <unistd.h>
 #include <sys/syscall.h>
 #include <sys/types.h>
@@ -8,38 +10,59 @@
 #include <argp.h>
 #include <sys/ptrace.h>
 #include <linux/ptrace.h>
+#include "utils.h"
+#include <string.h>
+#include "cage.h"
+#include "container.h"
+
+//Eventually replace with cmd line arg
+#define STACK_SIZE 1000
+
 int
 main(int argc, char **argv)
 {
-  pid_t child_pid;
-  int status;
-  char* args[] = {"./kitten", "testfile", NULL};
+  if(argc == 1 || strcmp(argv[1], "--help") == 0){
+    print_usage();
+    return EXIT_FAILURE;
+  } 
 
-  switch(child_pid = fork()) {
-    case -1:
-      return -1;
-    /* We make the child process traceable, pause it to give time for the 
-       parent to set up tracking, then start ./kitten */
-    case 0:
-      ptrace(PTRACE_TRACEME,0, NULL, NULL);
-      raise(SIGSTOP);
-      execve("./kitten", args, NULL);
-      _exit(EXIT_SUCCESS);
-    default:
-      break;
+  char *stack;
+  char *stackTop;
+  int s, flags;
+
+  //Flag configuration
+  flags = CLONE_NEWNET | CLONE_NEWPID | CLONE_NEWNS;
+
+  stack = malloc(STACK_SIZE);
+  if(stack == NULL){
+    die("malloc");
   }
+  stackTop = stack + STACK_SIZE;
 
+  int child;
+  child = clone(container_setup, stackTop, flags, NULL);
+  if (child == -1)
+  {
+    die("clone");
+  }
+  char *args[] = {"./kitten", "testfile", NULL};
+  trace_syscalls(child, args);
+}
+void 
+trace_syscalls(pid_t child, char *args[])
+{
+  int status;
   //Waits until child is stopped
-  waitpid(child_pid, &status, 0);
+  waitpid(child, &status, 0);
 
   //This flag allows for us to distinguish stops from syscalls and usual stops
-  ptrace(PTRACE_SETOPTIONS, child_pid, NULL, PTRACE_O_TRACESYSGOOD);
+  ptrace(PTRACE_SETOPTIONS, child, NULL, PTRACE_O_TRACESYSGOOD);
 
   //This sends SIGCONT to the child, then stops upon the next syscall enter/exit
-  ptrace(PTRACE_SYSCALL, child_pid, NULL, NULL);
+  ptrace(PTRACE_SYSCALL, child, NULL, NULL);
 
   //Waits until child exits normally, gets killed by a signal, or stops (either due to a normal signal, or a syscall related signal)
-  while(waitpid(child_pid, &status, 0) != -1){
+  while(waitpid(child, &status, 0) != -1){
     if(WIFEXITED(status)){
       printf("The child exited\n");
       fflush(stdout);
@@ -54,16 +77,45 @@ main(int argc, char **argv)
       int sig = WSTOPSIG(status);
       if(sig == (SIGTRAP | 0x80)){
         struct ptrace_syscall_info sc_info = {0};
-        ptrace(PTRACE_GET_SYSCALL_INFO, child_pid,sizeof(sc_info), &sc_info);
+        ptrace(PTRACE_GET_SYSCALL_INFO, child,sizeof(sc_info), &sc_info);
 
-        fprintf(stderr, "SYSCALL: %llu\n", sc_info.entry.nr);
-        ptrace(PTRACE_SYSCALL, child_pid, NULL, NULL);
+        print_syscall(sc_info.entry.nr);
+        if (sc_info.entry.nr == 0 || sc_info.entry.nr == 1 || sc_info.entry.nr == 3){
+          detect_file_io(&sc_info); 
+        }
+        ptrace(PTRACE_SYSCALL, child, NULL, NULL);
       }
       else{
         printf("Something stopped\n");
         fflush(stdout);
-        ptrace(PTRACE_SYSCALL, child_pid, NULL, NULL);
+        ptrace(PTRACE_SYSCALL, child, NULL, NULL);
       }
     }
   }
+}
+
+void 
+detect_file_io(struct ptrace_syscall_info* sc_info)
+{
+  if (sc_info->entry.nr == 0) {
+    //TODO: write func that reads /proc/ of child to see file name assocaited with fd
+    
+    fprintf(stderr, "[rdi] File Desriptor: %llu\n", sc_info->entry.args[0]); 
+    fprintf(stderr, "[rsi] Read bytes to: %p\n", sc_info->entry.args[1]);
+    fprintf(stderr, "[rdx] Read %llu bytes\n", sc_info->entry.args[2]);
+ }
+  else if(sc_info->entry.nr == 1){
+    if (!(sc_info->entry.args[0] == 0 || sc_info->entry.args[0] == 1 ||
+       sc_info->entry.args[0] == 1)){
+      fprintf(stderr, "A FILE WAS CHANGED\n");
+    }
+    fprintf(stderr, "[rdi] Wrote to fd: %llu\n", sc_info->entry.args[0]); 
+    fprintf(stderr, "[rsi] Wrote bytes from: %p\n", sc_info->entry.args[1]);
+    fprintf(stderr, "[rdx] Wrote %llu bytes\n", sc_info->entry.args[2]);
+ 
+  }
+}
+
+static int child(void *arg){
+  //Need to set up isolation/mounts then call execve.
 }
