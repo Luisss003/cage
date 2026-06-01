@@ -1,6 +1,8 @@
+#include <sys/syscall.h>
+#include <unistd.h>
 #include <sys/mount.h>
+#include <stdio.h>
 #include <sys/ptrace.h>
-#include <signal.h>
 #include <stdlib.h>
 #include <fcntl.h>
 #include <sys/stat.h>
@@ -10,42 +12,58 @@
 void
 container_setup(void *arg)
 {
-  ptrace(PTRACE_TRACEME, 0, NULL, NULL);
-  raise(SIGSTOP);
-  mode_t mode;
-  //setup container junk
-  //First, create a new directory to act as new root
-  
+
+  //Prevent mount propogation
+  if(mount(NULL, "/", NULL, MS_REC | MS_PRIVATE, NULL) == -1){
+    die("mount");
+  }
+
+  //Create a temp dir to use as mount point
   char template[] = "/tmp/jail.XXXXXX";
-  char * root = mkdtemp(template);
+  char * newroot = mkdtemp(template);
 
   //Then make the new dir a mount point itself to later be used by pivot
-  if(mount(
-
-
-  if(mkdirat(dir, "bin", mode) == -1){
-    die("mkdirat");
+  if(mount(newroot, newroot, NULL, MS_BIND | MS_REC, NULL) == -1){
+    die("bind newroot to itself");
   }
 
-  if(mkdirat(dir, "lib", mode) == -1){
-    die("mkdirat");
+  //Safely bind mount required libraries
+  char *bind_dir[] = {"/bin", "/usr", "/lib", "/lib64"};
+  for (int i = 0; i < 4; i++){
+    char *temp_dir = malloc(1024);
+    snprintf(temp_dir, 1024, "%s%s", newroot, bind_dir[i]);
+    if(mkdir(temp_dir, 0755) == -1){
+      die("mkdir");
+    }
+
+    if(mount(bind_dir[i], temp_dir, NULL, MS_BIND | MS_REC, NULL) == -1){
+      die("mount bind");
+    }
+
+    //Remount for readonly perms
+    if(mount(NULL, temp_dir, NULL, MS_BIND | MS_REC | MS_RDONLY | MS_REMOUNT, NULL) == -1) die("mount rebind");
   }
 
-  if(mkdirat(dir, "lib64", mode) == -1){
-    die("mkdirat");
-  }
+  //Create oldroot mount point
+  char oldroot[1024];
+  snprintf(oldroot, sizeof(oldroot), "%s/oldroot", newroot);
+  if(mkdir(oldroot, 0755) == -1) die("mkdir oldroot");
+  fprintf(stderr, "Oldroot: %s\n", oldroot);
 
-  if(mkdirat(dir, "proc", mode) == -1){
-    die("mkdirat");
-  }
+  //After creating bind mounts, isolate file system via pivot
+  if(syscall(SYS_pivot_root, newroot, oldroot) == -1) die("pivot");
+  chdir("/");
+  
+  //After pivoting, delete oldroot
+  if(umount2("oldroot", MNT_DETACH) == -1) die("umount2");
+  if(rmdir("oldroot") == -1) die("rmdir");
 
-  if(mkdirat(dir, "usr", mode) == -1){
-    die("mkdirat");
-  }
+  //Now, need to remount proc, since we are going to isolate PID namespace
+  if(mkdir("/proc", 0555) == -1) die("mkdir proc");
+  if(mount("proc", "/proc", "proc", 0, NULL) == -1) die("mount proc");
 
-  if(mkdirat(dir, "oldroot", mode) == -1){
-    die("mkdirat");
-  }
-
+  if(sethostname("cage", 4) == -1) die("sethostname");
+  execlp("/bin/sh", "sh", NULL);
+  die("execve");
 
 }

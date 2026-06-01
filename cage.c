@@ -16,7 +16,7 @@
 #include "container.h"
 
 //Eventually replace with cmd line arg
-#define STACK_SIZE 1000
+#define STACK_SIZE (1024 * 1024)
 
 int
 main(int argc, char **argv)
@@ -30,8 +30,7 @@ main(int argc, char **argv)
   char *stackTop;
   int s, flags;
 
-  //Flag configuration
-  flags = CLONE_NEWNET | CLONE_NEWPID | CLONE_NEWNS;
+  flags = CLONE_NEWNET | CLONE_NEWPID | CLONE_NEWNS | CLONE_NEWUTS | SIGCHLD;
 
   stack = malloc(STACK_SIZE);
   if(stack == NULL){
@@ -45,8 +44,10 @@ main(int argc, char **argv)
   {
     die("clone");
   }
-  char *args[] = {"./kitten", "testfile", NULL};
-  trace_syscalls(child, args);
+  //char *args[] = {"./kitten", "testfile", NULL};
+  //trace_syscalls(child, args);
+  waitpid(child, NULL, 0);  
+  return 0;
 }
 void 
 trace_syscalls(pid_t child, char *args[])
