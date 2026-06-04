@@ -21,11 +21,7 @@
 int
 main(int argc, char **argv)
 {
-  if(argc == 1 || strcmp(argv[1], "--help") == 0){
-    print_usage();
-    return EXIT_FAILURE;
-  } 
-
+  
   char *stack;
   char *stackTop;
   int s, flags;
@@ -39,13 +35,11 @@ main(int argc, char **argv)
   stackTop = stack + STACK_SIZE;
 
   int child;
-  child = clone(container_setup, stackTop, flags, NULL);
-  if (child == -1)
-  {
-    die("clone");
-  }
-  //char *args[] = {"./kitten", "testfile", NULL};
-  //trace_syscalls(child, args);
+  char *args[] = {"kitten", "testfile", NULL};
+  child = clone(container_setup, stackTop, flags, args);
+  if (child == -1) die("clone");
+  
+    //trace_syscalls(child, args);
   waitpid(child, NULL, 0);  
   return 0;
 }
