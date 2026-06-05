@@ -13,6 +13,7 @@
 #include "utils.h"
 #include <string.h>
 #include "cage.h"
+#include "utils.h"
 #include "container.h"
 
 //Eventually replace with cmd line arg
@@ -21,12 +22,17 @@
 int
 main(int argc, char **argv)
 {
-  
+
+  struct child_args args;
+  if(pipe(args.pipe_fd) == -1) die("pipe");
+  char *exec_args[] = {"kitten", "testfile", NULL};
+  args.exec_args = exec_args;
+
   char *stack;
   char *stackTop;
   int s, flags;
 
-  flags = CLONE_NEWNET | CLONE_NEWPID | CLONE_NEWNS | CLONE_NEWUTS | SIGCHLD;
+  flags = CLONE_NEWNET | CLONE_NEWPID | CLONE_NEWNS | CLONE_NEWUTS | SIGCHLD | CLONE_NEWUSER;
 
   stack = malloc(STACK_SIZE);
   if(stack == NULL){
@@ -35,11 +41,18 @@ main(int argc, char **argv)
   stackTop = stack + STACK_SIZE;
 
   int child;
-  char *args[] = {"kitten", "testfile", NULL};
-  child = clone(container_setup, stackTop, flags, args);
-  if (child == -1) die("clone");
   
-    //trace_syscalls(child, args);
+
+  child = clone(container_setup, stackTop, flags, &args);
+  if (child == -1) die("clone");
+  close(args.pipe_fd[0]);
+
+  write_user_files(child);
+
+  if(write(args.pipe_fd[1], "x", 1) != 1) die("write sync");
+  close(args.pipe_fd[1]);
+
+  //trace_syscalls(child, args);
   waitpid(child, NULL, 0);  
   return 0;
 }

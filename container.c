@@ -9,13 +9,22 @@
 #include <sys/stat.h>
 
 #include "container.h"
+#include "cage.h"
 #include "utils.h"
 #define BUF_MAX 1024
 
 int
 container_setup(void *arg)
 {
-  char ** exec_args = arg;
+  struct child_args *args = (struct child_args*)arg;
+  close(args[0].pipe_fd[1]);
+  char buf;
+  if(read(args[0].pipe_fd[0], &buf, 1) != 1) die("read sync");
+  close(args[0].pipe_fd[0]);
+
+
+  if(setgid(0) == -1) die("setgid");
+  if(setuid(0) == -1) die("setuid");
 
   if(mount(NULL, "/", NULL, MS_REC | MS_PRIVATE, NULL) == -1){
     die("mount");
@@ -46,8 +55,8 @@ container_setup(void *arg)
 
   //Copy executable to container, then within container, make it executable
   char *c_exec_file = malloc(1024);
-  snprintf(c_exec_file, 1024, "%s/%s", newroot, exec_args[0]);
-  copy_file(exec_args[0], c_exec_file); 
+  snprintf(c_exec_file, 1024, "%s/%s", newroot, args->exec_args[0]);
+  copy_file(args->exec_args[0], c_exec_file); 
 
   //Create oldroot mount point
   char oldroot[1024];

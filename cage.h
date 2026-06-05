@@ -6,5 +6,6 @@ void detect_file_io(struct ptrace_syscall_info*);
 
 struct child_args{
   int pipe_fd[2];
+  char **exec_args;
 };
 #endif
