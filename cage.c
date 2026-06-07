@@ -124,6 +124,3 @@ detect_file_io(struct ptrace_syscall_info* sc_info)
   }
 }
 
-static int child(void *arg){
-  //Need to set up isolation/mounts then call execve.
-}

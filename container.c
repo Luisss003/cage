@@ -11,6 +11,8 @@
 #include "container.h"
 #include "cage.h"
 #include "utils.h"
+#include "seccomp.h"
+
 #define BUF_MAX 1024
 
 int
@@ -63,20 +65,44 @@ container_setup(void *arg)
   snprintf(oldroot, sizeof(oldroot), "%s/oldroot", newroot);
   if(mkdir(oldroot, 0755) == -1) die("mkdir oldroot");
   fprintf(stderr, "Oldroot: %s\n", oldroot);
-
   //After creating bind mounts, isolate file system via pivot
   if(syscall(SYS_pivot_root, newroot, oldroot) == -1) die("pivot");
   chdir("/");
-  
-  //After pivoting, delete oldroot
-  if(umount2("oldroot", MNT_DETACH) == -1) die("umount2");
-  if(rmdir("oldroot") == -1) die("rmdir");
+   fprintf(stderr, "My new PID=%d\n", getpid());
 
   //Now, need to remount proc, since we are going to isolate PID namespace
   if(mkdir("/proc", 0555) == -1) die("mkdir proc");
   if(mount("proc", "/proc", "proc", 0, NULL) == -1) die("mount proc");
+ 
+  //After pivoting, delete oldroot
+  if(umount2("oldroot", MNT_DETACH) == -1) die("umount2");
+  if(rmdir("oldroot") == -1) die("rmdir");
+
 
   if(sethostname("cage", 4) == -1) die("sethostname");
+
+  int allow_list[] = {
+    59,   // execve
+    12,   // brk
+    9,    // mmap
+    21,   // access
+    257,  // openat
+    5,    // fstat
+    3,    // close
+    0,    // read
+    17,   // pread6
+    158,  // arch_prctl
+    218,  // set_tid_address
+    273,  // set_robust_list
+    334,  // rseq
+    10,   // mprotect
+    302,  // prlimit64
+    318,  // getrandom
+    11,   // munmap
+    1,    // write
+    231   // exit_group
+  };
+  setup_seccomp(allow_list, 19 );
   execlp("/bin/sh", "sh" , NULL);
   die("execve");
 

@@ -53,18 +53,30 @@ write_file(char *path, char *str)
 void
 write_user_files(pid_t pid)
 {
-  char path[256];
-  char map[256];
+    char path[256];
+    char map[256];
 
-  snprintf(path, sizeof(path), "/proc/%d/setgroups", pid);
-  write_file(path, "deny\n");
-  fprintf(stderr, "GOT PAST FIRST WRITE\n");
-  snprintf(path, sizeof(path), "/proc/%d/uid_map", pid);
-  snprintf(map, sizeof(map), "0 %d 1\n", getuid());
-  write_file(path, map);
+    uid_t outside_uid = getuid();
+    gid_t outside_gid = getgid();
 
-  snprintf(path, sizeof(path), "/proc/%d/gid_map", pid);
-  snprintf(map, sizeof(map), "0 %d 1\n", getgid());
-  write_file(path, map);
+    char *sudo_uid = getenv("SUDO_UID");
+    char *sudo_gid = getenv("SUDO_GID");
+
+    if (sudo_uid != NULL)
+        outside_uid = atoi(sudo_uid);
+
+    if (sudo_gid != NULL)
+        outside_gid = atoi(sudo_gid);
+
+    snprintf(path, sizeof(path), "/proc/%d/setgroups", pid);
+    write_file(path, "deny\n");
+
+    snprintf(path, sizeof(path), "/proc/%d/uid_map", pid);
+    snprintf(map, sizeof(map), "0 %d 1\n", outside_uid);
+    write_file(path, map);
+
+    snprintf(path, sizeof(path), "/proc/%d/gid_map", pid);
+    snprintf(map, sizeof(map), "0 %d 1\n", outside_gid);
+    write_file(path, map);
 }
 

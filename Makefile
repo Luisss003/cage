@@ -1,5 +1,5 @@
-cage: cage.c cage.h utils.c utils.h container.c container.h
-	gcc -o cage cage.c utils.c container.c 
+cage: cage.c cage.h utils.c utils.h container.c container.h seccomp.c seccomp.h
+	gcc -g -o cage cage.c utils.c container.c seccomp.c -lseccomp
 
 cage.o: cage.c 
 
