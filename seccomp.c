@@ -12,7 +12,7 @@ setup_seccomp(int allow_list[], size_t size)
   if((ctx =  seccomp_init(SCMP_ACT_ALLOW)) == NULL) die("seccomp_init");
 
   
-  for(int i = 0; i < size; i++){
+  for(size_t i = 0; i < size; i++){
     if(seccomp_rule_add(ctx, SCMP_ACT_ALLOW, allow_list[i], 0) == -1) die("seccomp_rule_add");
   }
   int status;

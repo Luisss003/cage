@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <sys/syscall.h>
 #include <string.h>
 #include <fcntl.h>
 #include "utils.h"
@@ -27,6 +28,12 @@ print_syscall(int n)
 
 }
 
+long
+syscall_lookup(char *s)
+{
+  if(strcmp(s, "read") == 0) return SYS_read; 
+}
+
 void
 die(const char *msg)
 {
@@ -45,7 +52,6 @@ write_file(char *path, char *str)
 {
   int fd;
   if((fd = open(path, O_WRONLY)) == -1) die("open");
-  printf("attempting to write\n");
   if(write(fd, str, strlen(str)) != (ssize_t)strlen(str)) die("write");
   close(fd);
 }

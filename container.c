@@ -1,4 +1,6 @@
 #define _GNU_SOURCE
+#include <errno.h>
+#include <string.h>
 #include <sys/syscall.h>
 #include <unistd.h>
 #include <sys/mount.h>
@@ -7,18 +9,26 @@
 #include <stdlib.h>
 #include <fcntl.h>
 #include <sys/stat.h>
+#include <seccomp.h>
 
 #include "container.h"
 #include "cage.h"
 #include "utils.h"
-#include "seccomp.h"
 
 #define BUF_MAX 1024
 
 int
 container_setup(void *arg)
 {
-  struct child_args *args = (struct child_args*)arg;
+   //Read syscall config file; if doesn't exist, deny all syscalls by default
+  int *allow_list = NULL;
+  read_syscall_config(&allow_list);
+  if(allow_list != NULL) {
+    for (size_t i = 0; i < 3; i++) {
+      fprintf(stderr, "%d\n", allow_list[i]);
+    }
+  }
+ struct child_args *args = (struct child_args*)arg;
   close(args[0].pipe_fd[1]);
   char buf;
   if(read(args[0].pipe_fd[0], &buf, 1) != 1) die("read sync");
@@ -78,34 +88,61 @@ container_setup(void *arg)
   if(umount2("oldroot", MNT_DETACH) == -1) die("umount2");
   if(rmdir("oldroot") == -1) die("rmdir");
 
-
   if(sethostname("cage", 4) == -1) die("sethostname");
 
-  int allow_list[] = {
-    59,   // execve
-    12,   // brk
-    9,    // mmap
-    21,   // access
-    257,  // openat
-    5,    // fstat
-    3,    // close
-    0,    // read
-    17,   // pread6
-    158,  // arch_prctl
-    218,  // set_tid_address
-    273,  // set_robust_list
-    334,  // rseq
-    10,   // mprotect
-    302,  // prlimit64
-    318,  // getrandom
-    11,   // munmap
-    1,    // write
-    231   // exit_group
-  };
-  setup_seccomp(allow_list, 19 );
+  //setup_seccomp(allow_list, 19 );
+  free(allow_list);
   execlp("/bin/sh", "sh" , NULL);
   die("execve");
+}
 
+void
+read_syscall_config(int **allow_list)
+{
+  char syscall[256];
+  size_t syscall_count = 0;
+  size_t arr_len = 0;
+  
+  FILE* fp = fopen("./syscall_config", "r");
+  
+  if(fp == NULL){
+    if(errno == ENOENT) {
+      fprintf(stderr, 
+              "1: NO SYSCALL CONFIGURATION SPECIFIED. "
+              "FILTERING ALL SYSCALLS BY DEFAULT\n");
+      return;
+    }
+    die("fopen syscall_config");
+  }
+
+  while(fgets(syscall, sizeof(syscall), fp)) {
+    syscall[strcspn(syscall, "\r\n")] = '\0';
+
+    if(syscall_count >= arr_len){
+      size_t new_arr_len = arr_len == 0 ? 4 : arr_len * 2;
+      int *tmp = realloc(*allow_list, new_arr_len * sizeof(**allow_list));
+      if(tmp == NULL) {
+        fclose(fp);
+        die("realloc");
+      }
+      *allow_list = tmp;
+      arr_len = new_arr_len;
+    }
+    int syscall_num = seccomp_syscall_resolve_name(syscall);
+            if (syscall_num == __NR_SCMP_ERROR) {
+            fprintf(stderr, "Unknown syscall: %s\n", syscall);
+            free(*allow_list);
+            *allow_list = NULL;
+            fclose(fp);
+            exit(EXIT_FAILURE);
+        }
+    (*allow_list)[syscall_count] = syscall_num;
+    syscall_count++;
+  }
+  fclose(fp);
+  if(syscall_count == 0) fprintf(stderr, 
+                                 "NO SYSCALL CONFIGURATION SPECIFIED. "
+                                 "FILTERING ALL SYSCALLS BY DEFAULT\n");
 }
 
 void
